@@ -1307,6 +1307,7 @@ select.control{ appearance: none; -webkit-appearance: none; padding-right: 30px;
     <div class="save-acts">
       <button class="btn btn-primary save-share" id="saveShare" type="button" hidden>保存到相册</button>
       <button class="btn btn-ghost" id="saveOpen" type="button" hidden>新窗口打开</button>
+      <button class="btn btn-ghost" id="saveToGif" type="button" hidden>改存动图（相册/微信可发）</button>
       <button class="btn btn-ghost" id="saveDownload" type="button">下载文件</button>
     </div>
   </div>
@@ -3053,6 +3054,7 @@ try { exports.GifWriter = GifWriter; exports.GifReader = GifReader } catch(e) {}
     $('#saveStage').innerHTML = '';
     $('#saveShare').hidden = true;
     $('#saveOpen').hidden = true;
+    $('#saveToGif').hidden = true;
     if (saveObj) { URL.revokeObjectURL(saveObj.url); saveObj = null; }
   }
 
@@ -3076,15 +3078,23 @@ try { exports.GifWriter = GifWriter; exports.GifReader = GifReader } catch(e) {}
     var file = null;
     try { file = new File([blob], name, { type: blob.type || 'application/octet-stream' }); } catch (e) { file = null; }
     var canShare = !!(navigator.canShare && file && navigator.canShare({ files: [file] }));
+    var isWebm = /webm/.test(String(blob.type || ''));
     $('#saveShare').hidden = !canShare;
     $('#saveOpen').hidden = kind !== 'video';
-    $('#saveTip').textContent = kind === 'video'
-      ? (canShare
-          ? 'MP4 格式（H.264），点「保存到相册」调起系统面板选「存储视频」即可。'
-          : 'MP4 格式（H.264，相册可直接读）。点「新窗口打开」用系统分享存进相册，或「下载文件」。')
-      : (canShare
-          ? '长按上方图片，选「存储图像／保存图片」就能进相册；也可以点「保存到相册」。'
-          : '长按上方图片，选「存储图像／保存图片」即可存进相册；电脑上点「下载文件」。');
+    $('#saveToGif').hidden = !(kind === 'video' && isWebm && window.GIFEnc);
+    if (kind === 'video') {
+      if (isWebm) {
+        $('#saveTip').textContent = '当前浏览器只能导出 webm 视频，手机相册和微信通常无法识别；建议点「改存动图」保存 GIF（相册/微信都能发），或用系统浏览器（Chrome）打开再存视频。';
+      } else if (canShare) {
+        $('#saveTip').textContent = 'MP4 格式（H.264），点「保存到相册」调起系统面板选「存储视频」即可。';
+      } else {
+        $('#saveTip').textContent = 'MP4 格式（H.264，相册可直接读）。点「新窗口打开」用系统分享存进相册，或「下载文件」。';
+      }
+    } else {
+      $('#saveTip').textContent = canShare
+        ? '长按上方图片，选「存储图像／保存图片」就能进相册；也可以点「保存到相册」。'
+        : '长按上方图片，选「存储图像／保存图片」即可存进相册；电脑上点「下载文件」。';
+    }
     $('#saveSheet').hidden = false;
 
     $('#saveShare').onclick = function () {
@@ -3094,6 +3104,10 @@ try { exports.GifWriter = GifWriter; exports.GifReader = GifReader } catch(e) {}
     $('#saveOpen').onclick = function () {
       if (!saveObj) return;
       window.open(saveObj.url, '_blank');
+    };
+    $('#saveToGif').onclick = function () {
+      closeSheet();
+      saveGif();
     };
     $('#saveDownload').onclick = function () {
       if (!saveObj) return;
@@ -3231,12 +3245,23 @@ try { exports.GifWriter = GifWriter; exports.GifReader = GifReader } catch(e) {}
       if (audioStream) audioStream.getAudioTracks().forEach(function (tr) { stream.addTrack(tr); });
 
       var rec = null, mime = null;
-      for (var mi = 0; mi < mimes.length; mi++) {
-        if (!MediaRecorder.isTypeSupported(mimes[mi])) continue;
+      function tryMime(ct) {
         try {
-          rec = new MediaRecorder(stream, { mimeType: mimes[mi], videoBitsPerSecond: 2500000 });
-          mime = mimes[mi]; break;
-        } catch (e) { rec = null; }
+          return ct
+            ? new MediaRecorder(stream, { mimeType: ct, videoBitsPerSecond: 2500000 })
+            : new MediaRecorder(stream);
+        } catch (e) { return null; }
+      }
+      for (var mi = 0; mi < mimes.length; mi++) {
+        /* 部分浏览器 isTypeSupported 判断不准：即使返回 false 也尝试构造，构造不报错即采用 */
+        var supported = true;
+        try { supported = !MediaRecorder.isTypeSupported || MediaRecorder.isTypeSupported(mimes[mi]); } catch (e) { supported = true; }
+        var r = tryMime(mimes[mi]);
+        if (r) { rec = r; mime = supported ? mimes[mi] : (r.mimeType || mimes[mi]); break; }
+      }
+      if (!rec) {
+        var r0 = tryMime(null);
+        if (r0) { rec = r0; mime = r0.mimeType || 'video/webm'; }
       }
       if (!rec) {
         stopBgmForRecord();
