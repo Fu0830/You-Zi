@@ -5206,12 +5206,17 @@ if (typeof module === "object" && typeof module.exports === "object") Object.ass
           firstTimestampBehavior: 'offset'
         });
         var durQ = [];
+        /* 编码器常不回传 decoderConfig.colorSpace，导致 MP4 缺色彩标记，真机按错误范围/矩阵解码而发灰；这里按 H.264 位流实际的 SMPTE 170M / limited 补齐声明 */
+        var VIDEO_CS = { primaries: 'smpte170m', transfer: 'smpte170m', matrix: 'smpte170m', fullRange: false };
         encoder = new VideoEncoder({
           output: function (chunk, meta) {
             var d = durQ.shift() || frameUs;
             var data = new Uint8Array(chunk.byteLength);
             chunk.copyTo(data);
-            muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, d, meta);
+            var meta2 = meta && meta.decoderConfig
+              ? Object.assign({}, meta, { decoderConfig: Object.assign({}, meta.decoderConfig, { colorSpace: VIDEO_CS }) })
+              : meta;
+            muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, d, meta2);
           },
           error: function (e) { fail(e); }
         });
@@ -5236,7 +5241,7 @@ if (typeof module === "object" && typeof module.exports === "object") Object.ass
           st.draw(t);
           var src = st.canvas;
           if (out) { out.getContext('2d').drawImage(src, 0, 0, W, H); src = out; }
-          var frame = new VideoFrame(src, { timestamp: Math.round(i * frameUs), duration: frameUs });
+          var frame = new VideoFrame(src, { timestamp: Math.round(i * frameUs), duration: frameUs, colorSpace: 'srgb' });
           durQ.push(frameUs);
           encoder.encode(frame, { keyFrame: i % fps === 0 });
           frame.close();
